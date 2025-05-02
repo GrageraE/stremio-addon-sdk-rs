@@ -23,11 +23,6 @@ fn handle_stream(resource: &ResourceRef) -> EnvFuture<ResourceResponse> {
     return Box::new(future::ok(ResourceResponse::Streams {streams}));
 }
 
-/* fn handle_meta(req: &ResourceRef) -> EnvFuture<ResourceResponse> {
-    let res = ResourceResponse::Metas { metas: vec![] };
-    return Box::new(future::ok(res));
-} */
-
 fn handle_catalog(_resource: &ResourceRef) -> EnvFuture<ResourceResponse> {
     Box::new(future::ok(ResourceResponse::Metas {metas: vec![
         MetaPreview {
@@ -35,7 +30,7 @@ fn handle_catalog(_resource: &ResourceRef) -> EnvFuture<ResourceResponse> {
             name: "Big buck Bunny".into(),
             poster: Some("https://image.tmdb.org/t/p/w600_and_h900_bestv2/uVEFQvFMMsg4e6yb03xOfVsDz4o.jpg".into()),
             description: Some("addon test".into()),
-            type_name: "others".into(),
+            type_name: "movie".into(),
             ..Default::default()
         }
     ]}))

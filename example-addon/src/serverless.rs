@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod handlers;
 use stremio_addon_sdk::server::ServerOptions;
 use stremio_addon_sdk::server::serve_serverless;

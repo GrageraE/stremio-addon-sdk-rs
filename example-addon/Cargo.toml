@@ -7,9 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-stremio-core = { git = "https://github.com/stremio/stremio-core" }
+stremio-core = { git = "https://github.com/stremio/stremio-core", rev = "3d3e1008cd73d028decaf3f7ae572edadf8a045f" }
 stremio-addon-sdk = { path = "../sdk/" }
-semver = "*"
+semver = "0.9.0"
 futures = "0.1"
 tokio = { version = "0.2", features = ["full"] }
 

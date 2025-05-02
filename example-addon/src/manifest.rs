@@ -14,7 +14,7 @@ pub fn get_manifest() -> Manifest {
         types: vec!["movie".into()],
         catalogs: vec![
             ManifestCatalog {
-                type_name: "others".into(),
+                type_name: "movie".into(),
                 id: "bbbcatalog".into(),
                 name: Some("Rust test".into()),
                 extra: ManifestExtra::default()

@@ -24,9 +24,10 @@ async fn main() {
 
     // HTTP server settings
     let options = ServerOptions {
-        cache_max_age: 3600 * 24 *3, // cache for 3 days
+        // cache_max_age: 3600 * 24 *3, // cache for 3 days
+        cache_max_age: 0,
         port,
-        ip: Ipv4Addr::new(0,0,0,0).into(),
+        ip: Ipv4Addr::new(127,0,0,1).into(),
     };
 
     // run HTTP server asynchronously

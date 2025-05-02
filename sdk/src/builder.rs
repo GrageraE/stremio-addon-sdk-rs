@@ -190,7 +190,7 @@ impl BuilderWithHandlers {
     pub fn build(&self) -> Self {
         let errors = self.validate();
         if errors.len() > 0 {
-            panic!(format!("\n--failed to build addon interface-- \n{}", errors.join("\n")));
+            panic!("\n--failed to build addon interface-- \n{}", errors.join("\n"));
         }
         self.clone()
     }
