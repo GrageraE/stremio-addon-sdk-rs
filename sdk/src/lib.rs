@@ -14,6 +14,9 @@ pub mod export {
 }
 pub mod scaffold;
 
+// Re-export stremio-core
+pub use stremio_core;
+
 #[cfg(test)]
 mod tests {
     use super::*;
