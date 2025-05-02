@@ -1,4 +1,6 @@
-use stremio_core::types::addons::{Manifest};
+use std::iter::FromIterator;
+
+use stremio_core::types::addons::Manifest;
 use semver::Version;
 use serde_json;
 
@@ -20,5 +22,14 @@ impl Scaffold {
             addon_catalogs: Vec::default(),
             behavior_hints: serde_json::map::Map::default() // Default::default()
         }
+    }
+
+    pub fn set_behavior_hints(adult: bool, p2p: bool, configurable: bool, configuration_required: bool)
+        -> serde_json::map::Map<String, serde_json::Value> 
+    {
+        serde_json::map::Map::from_iter([("adult".into(), adult.into()),
+                                        ("p2p".into(), p2p.into()),
+                                        ("configurable".into(), configurable.into()),
+                                        ("configurationRequired".into(), configuration_required.into())])  
     }
 }
