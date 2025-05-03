@@ -12,7 +12,11 @@ pub mod helpers;
 //         }
 //     }
 // }
+
+/// Functions to build defaults of some types in Stremio-core
 pub mod scaffold;
+/// Types extracted from old versions of Stremio-core (commit = 3d3e1008c), useful for the SDK
+pub mod util;
 
 // Re-export stremio-core
 pub use stremio_core;

@@ -15,10 +15,12 @@ use super::builder::BuilderWithHandlers;
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
     pub port: u16,
+    /// In seconds
     pub cache_max_age: i32,
     pub ip: IpAddr,
 }
 impl Default for ServerOptions {
+    /// The default is: cache_max_age = 3 days, port = 7070, ip = 127.0.0.1
     fn default() -> Self {
         Self {
             // cache 3 days
@@ -29,6 +31,7 @@ impl Default for ServerOptions {
     }
 }
 
+/// Start the HTTP server
 pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
     let addr = SocketAddr::new(options.ip, options.port);
     
