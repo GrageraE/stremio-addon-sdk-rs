@@ -1,13 +1,14 @@
 use super::landing_template::landing_template;
-use stremio_core::types::addons::Manifest;
-use hyper::{Response, Request, Body, StatusCode, header, Method};
+use stremio_core::types::addon::Manifest;
+use hyper::{header, Body, Method, Request, Response, StatusCode};
+use hyper::rt::{Future, Stream};
 use serde_json;
 use now_lambda::IntoResponse;
 use super::server::ServerOptions;
 use super::builder::BuilderWithHandlers;
 use super::builder::AddonRouter;
-use futures::stream::Stream;
-use futures::future::Future;
+// use futures::stream::Stream;
+// use futures::future::Future;
 
 pub type Result<T> = std::result::Result<T, RouterError>;
 
@@ -23,7 +24,7 @@ pub struct RouterResponse {
 // implement now.sh lambda response trait
 impl IntoResponse for RouterResponse {
     // convert Hyper Response to Now.sh Response
-    fn into_response(self) -> Response<now_lambda::Body> {
+    fn into_response(self) -> now_lambda::Response<now_lambda::Body> {
         let (parts, body) = self.response.into_parts();
 
         // get original response body as bytes array
@@ -37,7 +38,7 @@ impl IntoResponse for RouterResponse {
         let mut bytes_array: Vec<u8> = vec![];
         bytes_array.extend_from_slice(&*bytes);
        
-        Response::from_parts(parts, now_lambda::Body::from(bytes_array))
+        now_lambda::Response::from_parts(parts, now_lambda::Body::from(bytes_array))
     }
 }
 // read RouterResponse from Hyper Response
@@ -107,8 +108,8 @@ impl Router {
         self.json_response(json)
     }
 
-    pub fn handle_resource(&self, path: &str) -> Result<Response<Body>> {
-        let res = match self.build.handle(path) {
+    pub async fn handle_resource(&self, path: &str) -> Result<Response<Body>> {
+        let res = match self.build.handle(path).await {
 			Some(res) => res,
 			None => return self.not_found()
         };
@@ -126,7 +127,7 @@ impl Router {
         self.handle_landing(landing_template(self.get_manifest()))
     }
 
-    pub fn route<T>(&self, request: Request<T>) -> Result<RouterResponse> {
+    pub async fn route<T>(&self, request: Request<T>) -> Result<RouterResponse> {
         if request.method() != Method::GET {
             return Ok(RouterResponse::from(self.method_not_allowed()?));
         }
@@ -137,7 +138,7 @@ impl Router {
             match path {
                 "/manifest.json" => self.handle_manifest()?,
                 "/" => self.handle_default_landing()?,
-                _ => self.handle_resource(path)?,
+                _ => self.handle_resource(path).await?,
             }
         ))
     }

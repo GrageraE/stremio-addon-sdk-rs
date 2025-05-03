@@ -20,7 +20,7 @@ pub use stremio_core;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stremio_core::types::addons::*;
+    use stremio_core::types::addon::*;
     use futures::future;
 
     #[test]
@@ -33,7 +33,7 @@ mod tests {
     #[should_panic]
     fn builder_panics_if_no_resources_defined_for_handler() {
         builder::Builder::new(scaffold::Scaffold::default_manifest())
-            .define_stream_handler(|_| Box::new(future::ok(ResourceResponse::Streams {streams: vec![]})))
+            .define_stream_handler(|_| Box::pin(future::ok(ResourceResponse::Streams {streams: vec![]})))
             .build();
     }
 
@@ -45,7 +45,7 @@ mod tests {
             ..scaffold::Scaffold::default_manifest()
         };
         builder::Builder::new(manifest)
-            .define_stream_handler(|_| Box::new(future::ok(ResourceResponse::Streams {streams: vec![]})))
+            .define_stream_handler(|_| Box::pin(future::ok(ResourceResponse::Streams {streams: vec![]})))
             .build();
     }
 }

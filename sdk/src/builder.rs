@@ -1,29 +1,31 @@
-use stremio_core::types::addons::{ResourceRef, ManifestResource, ParseResourceErr, ResourceResponse, Manifest};
-use stremio_core::addon_transport::AddonInterface;
-use stremio_core::state_types::EnvFuture;
+use stremio_core::types::addon::{ExtraValue, Manifest, ManifestResource, ResourcePath, ResourceResponse};
+use stremio_core::addon_transport::AddonTransport;
+use stremio_core::runtime::{EnvError, TryEnvFuture};
 use futures::{future, Future};
-use std::error::Error;
-use std::str::FromStr;
+use percent_encoding::percent_decode;
+use url::form_urlencoded;
 use std::sync::Arc;
 
-type Handler = dyn Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static;
-type RouterFut = Box<dyn Future<Item=ResourceResponse, Error=RouterErr>>;
+type Handler = dyn Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static;
+// type RouterFut = Box<dyn Future<Item=ResourceResponse, Error=RouterErr>>;
+type RouterFut = Box<dyn Future<Output = Result<ResourceResponse, EnvError>>>;
 
-#[derive(Debug)]
-pub enum RouterErr {
-    NotFound,
-    Handler(Box<dyn Error>),
-    Parse(ParseResourceErr)
-}
+// #[derive(Debug)]
+// pub enum RouterErr {
+//     NotFound,
+//     Handler(Box<dyn Error>),
+//     Parse(ParseResourceErr)
+// }
+// impl Error for RouterErr {}
+// impl std::fmt::Display for RouterErr {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "RouterError")
+//     }
+// }
+
 pub trait AddonRouter {
     fn get_manifest(&self) -> &Manifest;
     fn route(&self, path: &str) -> RouterFut;
-}
-impl Error for RouterErr {}
-impl std::fmt::Display for RouterErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RouterError")
-    }
 }
 
 // Base: just serving the manifest
@@ -37,7 +39,7 @@ impl AddonRouter for AddonBase {
     }
 
     fn route(&self, _: &str) -> RouterFut {
-        Box::new(future::err(RouterErr::NotFound))
+        Box::new(future::err(EnvError::Other("Not found".into())))
     }
 }
 
@@ -48,6 +50,7 @@ pub struct WithHandler<T: AddonRouter> {
     pub match_prefix: String,
     handler: Arc<Handler>
 }
+
 impl<T: AddonRouter> AddonRouter for WithHandler<T> {
     fn get_manifest(&self) -> &Manifest {
         self.base.get_manifest()
@@ -55,15 +58,76 @@ impl<T: AddonRouter> AddonRouter for WithHandler<T> {
 
     fn route(&self, path: &str) -> RouterFut {
         if path.starts_with(&self.match_prefix) {
-            let res = match ResourceRef::from_str(&path) {
+            let res = match str_to_resource_path(&path) {
                 Ok(r) => r,
-                Err(e) => return Box::new(future::err(RouterErr::Parse(e)))
+                Err(e) => return Box::new(future::err(EnvError::Other("Parse".into())))
             };
-            return Box::new((self.handler)(&res).map_err(|e| RouterErr::Handler(e)));
+            todo!()
+            // return Box::new(((self.handler)(&res)).into());
         }
         self.base.route(&path)
     }
 }
+
+#[derive(Debug)]
+pub enum ParseResourceErr {
+    WrongPrefix,
+    WrongSuffix,
+    InvalidLength(usize),
+    DecodeErr,
+}
+
+fn str_to_resource_path(s: &str) -> Result<ResourcePath, ParseResourceErr> {
+    if !s.starts_with('/') {
+        return Err(ParseResourceErr::WrongPrefix);
+    }
+    if !s.ends_with(".json") {
+        return Err(ParseResourceErr::WrongSuffix);
+    }
+    let components: Vec<&str> = s.trim_end_matches(".json").split('/').skip(1).collect();
+    match components.len() {
+        3 | 4 => Ok(ResourcePath {
+            resource: parse_component(components[0])?,
+            r#type: parse_component(components[1])?,
+            id: parse_component(components[2])?,
+            extra: components
+                .get(3)
+                .map(|e| form_urlencoded::parse(e.as_bytes()).into_owned()
+                    .map(|(name, value)| ExtraValue {
+                        name,
+                        value
+                    }).collect())
+                .unwrap_or_default(),
+        }),
+        i => Err(ParseResourceErr::InvalidLength(i)),
+    }
+}
+
+fn parse_component(s: &str) -> Result<String, ParseResourceErr> {
+    Ok(percent_decode(s.as_bytes())
+        .decode_utf8()
+        .map_err(|_| ParseResourceErr::DecodeErr)?
+        .to_string())
+}
+
+// fn map_err<S: TryFutureExt, E, F>(future: S, f: F) -> future::Map<IntoFuture<S>, futures_util::>
+// where
+//     F: FnOnce(S::Error) -> E,
+//     // Self: Sized,
+// {
+//     assert_future::<Result<S::Ok, E>, _>(future::MapErr::new(self, f))
+// }
+
+impl<T: AddonRouter> AddonTransport for WithHandler<T> {
+    fn manifest(&self) -> TryEnvFuture<Manifest> {
+        Box::pin(future::ok(self.get_manifest().to_owned()))
+    }
+    fn resource(&self, req: &ResourcePath) -> TryEnvFuture<ResourceResponse> {
+        todo!("Quitar mapeo del error deprecando RouteErr, sustituido por EnvError")
+        // Box::pin(self.route(&req.to_string()))
+    }
+}
+
 
 // Builder: constructs a new builder that implements WithHandler
 pub struct Builder;
@@ -86,7 +150,7 @@ pub struct BuilderWithHandlers {
 }
 impl BuilderWithHandlers {
     fn handle_resource<F>(&mut self, resource_name: &str, handler: F) -> &mut Self 
-    where F: Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static 
+    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
     {
         if self.handlers.iter().any(|h| self.prefix_to_name(&h.match_prefix) == resource_name) {
             panic!("handler for resource {} is already defined!", resource_name);
@@ -99,27 +163,27 @@ impl BuilderWithHandlers {
         self
     }
     pub fn define_stream_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static 
+    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
     {
         self.handle_resource("stream", handler)
     }
     pub fn define_meta_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static 
+    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
     {
         self.handle_resource("meta", handler)
     }
     pub fn define_catalog_handler<F>(&mut self, handler: F) -> &mut Self
-    where F: Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static {
+    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static {
         self.handle_resource("catalog", handler)
     }
     pub fn define_subtitles_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourceRef) -> EnvFuture<ResourceResponse> + Send + Sync + 'static 
+    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
     {
         self.handle_resource("subtitles", handler)
     }
-    pub fn handle(&self, path: &str) -> Option<ResourceResponse> {
+    pub async fn handle(&self, path: &str) -> Option<ResourceResponse> {
         // get requested resource
-        let resource = match ResourceRef::from_str(path) {
+        let resource = match str_to_resource_path(path) {
             Ok(r) => r,
             Err(_) => return None
         };
@@ -132,9 +196,9 @@ impl BuilderWithHandlers {
         };
         
         // execute the handler
-        let env_future: EnvFuture<ResourceResponse> = handler.get(&resource);
+        let env_future: TryEnvFuture<ResourceResponse> = handler.resource(&resource);
         
-        let resource_response = match env_future.wait() {
+        let resource_response = match env_future.await {
             Ok(r) => r,
             Err(_) => return None
         };
@@ -195,13 +259,3 @@ impl BuilderWithHandlers {
         self.clone()
     }
 }
-
-impl<T: AddonRouter> AddonInterface for WithHandler<T> {
-    fn manifest(&self) -> EnvFuture<Manifest> {
-        Box::new(future::ok(self.get_manifest().to_owned()))
-    }
-    fn get(&self, req: &ResourceRef) -> EnvFuture<ResourceResponse> {
-        Box::new(self.route(&req.to_string()).map_err(Into::into))
-    }
-}
-

@@ -1,6 +1,6 @@
 use std::iter::FromIterator;
 
-use stremio_core::types::addons::Manifest;
+use stremio_core::types::addon::Manifest;
 use semver::Version;
 use serde_json;
 

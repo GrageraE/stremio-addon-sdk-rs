@@ -1,4 +1,4 @@
-use stremio_core::types::addons::Manifest;
+use stremio_core::types::addon::Manifest;
 
 
 static STYLESHEET: &str = include_str!("../landing_style.css");
@@ -21,10 +21,10 @@ fn make_ascii_sentence_case(s: &mut str) {
 }
 
 pub fn landing_template(manifest: &Manifest) -> String {
-    let background = manifest.background.as_deref()
+    let background = manifest.background.as_ref().map(|url| url.as_str())
         .unwrap_or("https://dl.strem.io/addon-background.jpg");
 
-    let logo = manifest.logo.as_deref()
+    let logo = manifest.logo.as_ref().map(|url| url.as_str())
         .unwrap_or("https://dl.strem.io/addon-logo.png");
 
     let contact_html = manifest.contact_email.as_ref().map(|email| {

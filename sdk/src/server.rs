@@ -51,16 +51,16 @@ pub fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
     hyper::rt::run(server)
 }
 
-pub fn serve_serverless(
-    req: now_lambda::Request, build: BuilderWithHandlers, options: ServerOptions
-) -> Result<impl now_lambda::IntoResponse, now_lambda::error::NowError> {
-    let router = Router::new(build, options);
-    match router.route(req) {
-        Ok(router_response) => Ok(router_response),
-        Err(error) => {
-            let error_message = format!("service error: {:?}", error);
-            eprintln!("{}", error_message);
-            Err(now_lambda::error::NowError::new(&error_message))
-        }
-    }
-}
+// pub fn serve_serverless(
+//     req: now_lambda::Request, build: BuilderWithHandlers, options: ServerOptions
+// ) -> Result<impl now_lambda::IntoResponse, now_lambda::error::NowError> {
+//     let router = Router::new(build, options);
+//     match router.route(req) {
+//         Ok(router_response) => Ok(router_response),
+//         Err(error) => {
+//             let error_message = format!("service error: {:?}", error);
+//             eprintln!("{}", error_message);
+//             Err(now_lambda::error::NowError::new(&error_message))
+//         }
+//     }
+// }
