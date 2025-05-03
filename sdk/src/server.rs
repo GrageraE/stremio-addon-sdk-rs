@@ -50,6 +50,7 @@ pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
     // });
 
     let router = Arc::new(Router::new(build, options));
+    println!("Running on: {}", addr);
     loop {
         let (stream, _) = listener.accept().await.expect("Can listen");
         let io = TokioIo::new(stream);
@@ -72,7 +73,6 @@ pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
         });
 
         tokio::task::spawn(async move {
-            println!("Running on: {}", addr);
             if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                 eprintln!("Error serving connection: {:?}", err);
             }

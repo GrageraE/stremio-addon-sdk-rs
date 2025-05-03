@@ -1,6 +1,6 @@
 use semver::Version;
-use stremio_core::types::addons::*;
 use stremio_addon_sdk::scaffold::Scaffold;
+use stremio_addon_sdk::stremio_core::types::addon::{Manifest, ManifestResource, ManifestCatalog, ManifestExtra};
 
 pub fn get_manifest() -> Manifest {
     Manifest {
@@ -14,7 +14,7 @@ pub fn get_manifest() -> Manifest {
         types: vec!["movie".into()],
         catalogs: vec![
             ManifestCatalog {
-                type_name: "movie".into(),
+                r#type: "movie".into(),
                 id: "bbbcatalog".into(),
                 name: Some("Rust test".into()),
                 extra: ManifestExtra::default()

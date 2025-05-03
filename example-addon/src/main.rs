@@ -31,5 +31,5 @@ async fn main() {
     };
 
     // run HTTP server asynchronously
-    serve_http(interface, options);
+    serve_http(interface, options).await;
 }

@@ -1,6 +1,7 @@
 use std::iter::FromIterator;
 
 use stremio_core::types::addon::{Manifest, ManifestBehaviorHints};
+use stremio_core::types::resource::{MetaItemBehaviorHints, MetaItemPreview};
 use semver::Version;
 use serde_json;
 
@@ -20,10 +21,11 @@ impl Scaffold {
             id_prefixes: Option::default(),
             description: Option::default(),
             addon_catalogs: Vec::default(),
-            behavior_hints: ManifestBehaviorHints::default() // Default::default()
+            behavior_hints: ManifestBehaviorHints::default()
         }
     }
 
+    #[deprecated = "Not working with the current definition of behavior_hints. Not necessary"]
     pub fn set_behavior_hints(adult: bool, p2p: bool, configurable: bool, configuration_required: bool)
         -> serde_json::map::Map<String, serde_json::Value> 
     {
@@ -31,5 +33,24 @@ impl Scaffold {
                                         ("p2p".into(), p2p.into()),
                                         ("configurable".into(), configurable.into()),
                                         ("configurationRequired".into(), configuration_required.into())])  
+    }
+
+    pub fn default_item_preview() -> MetaItemPreview {
+        MetaItemPreview {
+            id: "0".into(),
+            r#type: "".into(),
+            name: "".into(),
+            poster: None,
+            background: None,
+            logo: None,
+            description: None,
+            release_info: None,
+            runtime: None,
+            released: None,
+            poster_shape: stremio_core::types::resource::PosterShape::default(),
+            links: vec![],
+            trailer_streams: vec![],
+            behavior_hints: MetaItemBehaviorHints::default()
+        }
     }
 }
