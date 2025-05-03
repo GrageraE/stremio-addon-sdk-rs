@@ -2,13 +2,16 @@ use stremio_core::types::addon::{ExtraValue, Manifest, ManifestResource, Resourc
 use stremio_core::addon_transport::AddonTransport;
 use stremio_core::runtime::{EnvError, TryEnvFuture};
 use futures::{future, Future};
-use percent_encoding::percent_decode;
+use percent_encoding::{percent_decode, utf8_percent_encode, PATH_SEGMENT_ENCODE_SET};
 use url::form_urlencoded;
+use std::fmt::Display;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::pin::Pin;
 
 type Handler = dyn Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static;
 // type RouterFut = Box<dyn Future<Item=ResourceResponse, Error=RouterErr>>;
-type RouterFut = Box<dyn Future<Output = Result<ResourceResponse, EnvError>>>;
+type RouterFut = Pin<Box<dyn Future<Output = Result<ResourceResponse, EnvError>> + Send>>;
 
 // #[derive(Debug)]
 // pub enum RouterErr {
@@ -22,6 +25,85 @@ type RouterFut = Box<dyn Future<Output = Result<ResourceResponse, EnvError>>>;
 //         write!(f, "RouterError")
 //     }
 // }
+
+/// The old `ParseResourceErr` from Stremio
+#[derive(Debug)]
+pub enum ParseResourceErr {
+    WrongPrefix,
+    WrongSuffix,
+    InvalidLength(usize),
+    DecodeErr,
+}
+
+/// Wraps a [ResourcePath] to get back some useful traits from the older `ResourceRef`
+#[derive(Debug)]
+pub struct ResourcePathWrapper {
+    inner: ResourcePath
+}
+
+impl From<ResourcePath> for ResourcePathWrapper {
+    fn from(value: ResourcePath) -> Self {
+        Self {
+            inner: value
+        }
+    }
+}
+
+impl From<ResourcePathWrapper> for ResourcePath {
+    fn from(value: ResourcePathWrapper) -> Self {
+        value.inner
+    }
+}
+
+impl Display for ResourcePathWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "/{}/{}/{}",
+            &utf8_percent_encode(&self.inner.resource, PATH_SEGMENT_ENCODE_SET),
+            &utf8_percent_encode(&self.inner.r#type, PATH_SEGMENT_ENCODE_SET),
+            &utf8_percent_encode(&self.inner.id, PATH_SEGMENT_ENCODE_SET)
+        )?;
+        if !self.inner.extra.is_empty() {
+            let mut extra_encoded = form_urlencoded::Serializer::new(String::new());
+            for extra_value in self.inner.extra.iter() {
+                extra_encoded.append_pair(&extra_value.name, &extra_value.value);
+            }
+            write!(f, "/{}", &extra_encoded.finish())?;
+        }
+        write!(f, ".json")
+    }
+}
+
+impl FromStr for ResourcePathWrapper {
+    type Err = ParseResourceErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !s.starts_with('/') {
+            return Err(ParseResourceErr::WrongPrefix);
+        }
+        if !s.ends_with(".json") {
+            return Err(ParseResourceErr::WrongSuffix);
+        }
+        let components: Vec<&str> = s.trim_end_matches(".json").split('/').skip(1).collect();
+        match components.len() {
+            3 | 4 => Ok(ResourcePath {
+                resource: parse_component(components[0])?,
+                r#type: parse_component(components[1])?,
+                id: parse_component(components[2])?,
+                extra: components
+                    .get(3)
+                    .map(|e| form_urlencoded::parse(e.as_bytes()).into_owned()
+                        .map(|(name, value)| ExtraValue {
+                            name,
+                            value
+                        }).collect())
+                    .unwrap_or_default(),
+            }.into()),
+            i => Err(ParseResourceErr::InvalidLength(i)),
+        }    
+    }
+}
 
 pub trait AddonRouter {
     fn get_manifest(&self) -> &Manifest;
@@ -39,7 +121,7 @@ impl AddonRouter for AddonBase {
     }
 
     fn route(&self, _: &str) -> RouterFut {
-        Box::new(future::err(EnvError::Other("Not found".into())))
+        Box::pin(future::err(EnvError::Other("Not found".into())))
     }
 }
 
@@ -58,48 +140,13 @@ impl<T: AddonRouter> AddonRouter for WithHandler<T> {
 
     fn route(&self, path: &str) -> RouterFut {
         if path.starts_with(&self.match_prefix) {
-            let res = match str_to_resource_path(&path) {
-                Ok(r) => r,
-                Err(e) => return Box::new(future::err(EnvError::Other("Parse".into())))
+            let res = match ResourcePathWrapper::from_str(path) {
+                Ok(r) => r.into(),
+                Err(_e) => return Box::pin(future::err(EnvError::Other("Parse".into())))
             };
-            todo!()
-            // return Box::new(((self.handler)(&res)).into());
+            return Box::pin((self.handler)(&res));
         }
         self.base.route(&path)
-    }
-}
-
-#[derive(Debug)]
-pub enum ParseResourceErr {
-    WrongPrefix,
-    WrongSuffix,
-    InvalidLength(usize),
-    DecodeErr,
-}
-
-fn str_to_resource_path(s: &str) -> Result<ResourcePath, ParseResourceErr> {
-    if !s.starts_with('/') {
-        return Err(ParseResourceErr::WrongPrefix);
-    }
-    if !s.ends_with(".json") {
-        return Err(ParseResourceErr::WrongSuffix);
-    }
-    let components: Vec<&str> = s.trim_end_matches(".json").split('/').skip(1).collect();
-    match components.len() {
-        3 | 4 => Ok(ResourcePath {
-            resource: parse_component(components[0])?,
-            r#type: parse_component(components[1])?,
-            id: parse_component(components[2])?,
-            extra: components
-                .get(3)
-                .map(|e| form_urlencoded::parse(e.as_bytes()).into_owned()
-                    .map(|(name, value)| ExtraValue {
-                        name,
-                        value
-                    }).collect())
-                .unwrap_or_default(),
-        }),
-        i => Err(ParseResourceErr::InvalidLength(i)),
     }
 }
 
@@ -110,21 +157,12 @@ fn parse_component(s: &str) -> Result<String, ParseResourceErr> {
         .to_string())
 }
 
-// fn map_err<S: TryFutureExt, E, F>(future: S, f: F) -> future::Map<IntoFuture<S>, futures_util::>
-// where
-//     F: FnOnce(S::Error) -> E,
-//     // Self: Sized,
-// {
-//     assert_future::<Result<S::Ok, E>, _>(future::MapErr::new(self, f))
-// }
-
 impl<T: AddonRouter> AddonTransport for WithHandler<T> {
     fn manifest(&self) -> TryEnvFuture<Manifest> {
         Box::pin(future::ok(self.get_manifest().to_owned()))
     }
     fn resource(&self, req: &ResourcePath) -> TryEnvFuture<ResourceResponse> {
-        todo!("Quitar mapeo del error deprecando RouteErr, sustituido por EnvError")
-        // Box::pin(self.route(&req.to_string()))
+        self.route(&ResourcePathWrapper::from(req.clone()).to_string())
     }
 }
 
@@ -183,8 +221,8 @@ impl BuilderWithHandlers {
     }
     pub async fn handle(&self, path: &str) -> Option<ResourceResponse> {
         // get requested resource
-        let resource = match str_to_resource_path(path) {
-            Ok(r) => r,
+        let resource = match ResourcePathWrapper::from_str(path) {
+            Ok(r) => r.into(),
             Err(_) => return None
         };
         dbg!(&resource);

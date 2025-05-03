@@ -1,6 +1,6 @@
 use std::iter::FromIterator;
 
-use stremio_core::types::addon::Manifest;
+use stremio_core::types::addon::{Manifest, ManifestBehaviorHints};
 use semver::Version;
 use serde_json;
 
@@ -20,7 +20,7 @@ impl Scaffold {
             id_prefixes: Option::default(),
             description: Option::default(),
             addon_catalogs: Vec::default(),
-            behavior_hints: serde_json::map::Map::default() // Default::default()
+            behavior_hints: ManifestBehaviorHints::default() // Default::default()
         }
     }
 

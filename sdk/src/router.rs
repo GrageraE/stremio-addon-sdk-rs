@@ -1,14 +1,13 @@
 use super::landing_template::landing_template;
 use stremio_core::types::addon::Manifest;
-use hyper::{header, Body, Method, Request, Response, StatusCode};
-use hyper::rt::{Future, Stream};
+use hyper::{header, Method, Request, Response, StatusCode};
+use hyper::body::Bytes;
+use http_body_util::Full;
 use serde_json;
-use now_lambda::IntoResponse;
+// use now_lambda::IntoResponse;
 use super::server::ServerOptions;
 use super::builder::BuilderWithHandlers;
 use super::builder::AddonRouter;
-// use futures::stream::Stream;
-// use futures::future::Future;
 
 pub type Result<T> = std::result::Result<T, RouterError>;
 
@@ -19,42 +18,42 @@ pub enum RouterError {
 }
 
 pub struct RouterResponse {
-    response: Response<Body>
+    response: Response<Full<Bytes>>
 }
 // implement now.sh lambda response trait
-impl IntoResponse for RouterResponse {
-    // convert Hyper Response to Now.sh Response
-    fn into_response(self) -> now_lambda::Response<now_lambda::Body> {
-        let (parts, body) = self.response.into_parts();
+// impl IntoResponse for RouterResponse {
+//     // convert Hyper Response to Now.sh Response
+//     fn into_response(self) -> now_lambda::Response<now_lambda::Body> {
+//         let (parts, body) = self.response.into_parts();
 
-        // get original response body as bytes array
-        let bytes = body
-            .concat2()
-            .wait()
-            // at least log error
-            .map_err(|error| eprintln!("into_response error: {}", error))
-            .unwrap()
-            .into_bytes();
-        let mut bytes_array: Vec<u8> = vec![];
-        bytes_array.extend_from_slice(&*bytes);
+//         // get original response body as bytes array
+//         let bytes = body
+//             .concat2()
+//             .wait()
+//             // at least log error
+//             .map_err(|error| eprintln!("into_response error: {}", error))
+//             .unwrap()
+//             .into_bytes();
+//         let mut bytes_array: Vec<u8> = vec![];
+//         bytes_array.extend_from_slice(&*bytes);
        
-        now_lambda::Response::from_parts(parts, now_lambda::Body::from(bytes_array))
-    }
-}
+//         now_lambda::Response::from_parts(parts, now_lambda::Body::from(bytes_array))
+//     }
+// }
 // read RouterResponse from Hyper Response
-impl From<Response<Body>> for RouterResponse {
-    fn from(response: Response<Body>) -> RouterResponse {
+impl From<Response<Full<Bytes>>> for RouterResponse {
+    fn from(response: Response<Full<Bytes>>) -> RouterResponse {
         Self {response}
     }
 }
 impl RouterResponse {
-    pub fn response(self) -> Response<Body> {
+    pub fn response(self) -> Response<Full<Bytes>> {
         self.response
     }
 
-    pub fn response_serverless(self) -> Response<now_lambda::Body> {
-        self.into_response()
-    }
+    // pub fn response_serverless(self) -> Response<now_lambda::Body> {
+    //     self.into_response()
+    // }
 }
 
 pub struct Router {
@@ -70,45 +69,45 @@ impl Router {
         self.build.handlers[0].get_manifest()
     }
 
-    fn json_response(&self, json: String) -> Result<Response<Body>> {
+    fn json_response(&self, json: String) -> Result<Response<Full<Bytes>>> {
         Response::builder()
             .status(StatusCode::OK)
             .header("access-control-allow-origin", "*") // CORS
             .header("Cache-Control", format!("max-age={}, public", self.options.cache_max_age)) // cache
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(json))
+            .body(Full::new(Bytes::from(json)) /*Body::from(json)*/)
             .map_err(RouterError::HttpError)
     }
 
-    fn html_response(&self, html: String) -> Result<Response<Body>> {
+    fn html_response(&self, html: String) -> Result<Response<Full<Bytes>>> {
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/html")
-            .body(Body::from(html))
+            .body(Full::new(Bytes::from(html)) /*Body::from(html)*/)
             .map_err(RouterError::HttpError)
     }
 
-    fn not_found(&self) -> Result<Response<Body>> {
+    fn not_found(&self) -> Result<Response<Full<Bytes>>> {
         Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(Body::from("Not Found"))
+            .body(Full::new(Bytes::from("Not found")))
             .map_err(RouterError::HttpError)
     }
 
-    fn method_not_allowed(&self) -> Result<Response<Body>> {
+    fn method_not_allowed(&self) -> Result<Response<Full<Bytes>>> {
         Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
-            .body(Body::from("Method not allowed"))
+            .body(Full::new(Bytes::from("Method not allowed")))
             .map_err(RouterError::HttpError)
     }
 
-    pub fn handle_manifest(&self) -> Result<Response<Body>> {
+    pub fn handle_manifest(&self) -> Result<Response<Full<Bytes>>> {
         let json = serde_json::to_string(self.get_manifest())
             .map_err(RouterError::SerdeError)?;
         self.json_response(json)
     }
 
-    pub async fn handle_resource(&self, path: &str) -> Result<Response<Body>> {
+    pub async fn handle_resource(&self, path: &str) -> Result<Response<Full<Bytes>>> {
         let res = match self.build.handle(path).await {
 			Some(res) => res,
 			None => return self.not_found()
@@ -119,11 +118,11 @@ impl Router {
         self.json_response(json)
     }
 
-    pub fn handle_landing(&self, template: String) -> Result<Response<Body>> {
+    pub fn handle_landing(&self, template: String) -> Result<Response<Full<Bytes>>> {
         self.html_response(template)
     }
 
-    pub fn handle_default_landing(&self) -> Result<Response<Body>> {
+    pub fn handle_default_landing(&self) -> Result<Response<Full<Bytes>>> {
         self.handle_landing(landing_template(self.get_manifest()))
     }
 
