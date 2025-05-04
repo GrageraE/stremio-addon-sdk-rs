@@ -4,13 +4,29 @@ use std::sync::Arc;
 use hyper::{Request, Response, StatusCode};
 use hyper::service::service_fn;
 use hyper::body::Bytes;
-use hyper::server::conn::http1;
 use http_body_util::Full;
-use hyper_util::rt::TokioIo;
+use flexible_hyper_server_tls::{HttpOrHttpsAcceptor, rustls_helpers};
 use tokio::net::TcpListener;
 
 use super::router::Router;
 use super::builder::BuilderWithHandlers;
+
+/// Contains info for the HTTPS feature
+#[derive(Debug, Clone)]
+pub enum TLSInfo {
+    NoTLS,
+    TLS {
+        cert_path: String,
+        key_path: String
+    }
+}
+
+impl Default for TLSInfo {
+    /// Default: No TLS
+    fn default() -> Self {
+        Self::NoTLS
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
@@ -18,45 +34,39 @@ pub struct ServerOptions {
     /// In seconds
     pub cache_max_age: i32,
     pub ip: IpAddr,
+    pub tls: TLSInfo
 }
+
 impl Default for ServerOptions {
-    /// The default is: cache_max_age = 3 days, port = 7070, ip = 127.0.0.1
+    /// The default is: cache_max_age = 3 days, port = 7070, ip = 127.0.0.1, no TLS
     fn default() -> Self {
         Self {
             // cache 3 days
             cache_max_age: 24 * 3600 * 3,
             port: 7070,
             ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            tls: TLSInfo::default()
         }
     }
 }
 
 /// Start the HTTP server
-pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
+pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) 
+    -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(options.ip, options.port);
     
-    let listener = TcpListener::bind(addr).await.expect("Can bind TCP Listener");
+    let listener = TcpListener::bind(addr).await?;
+    let mut listener_tls = HttpOrHttpsAcceptor::new(listener);
 
-    // let service = make_service_fn(move |_: &AddrStream| {
-    //     // let router = Router::new(build.clone(), options.clone());
-    //     service_fn_ok(move |req: Request<Body>| {
-    //         match router.route(req).await {
-    //             Ok(router_response) => router_response.response(),
-    //             Err(error) => {
-    //                 eprintln!("service error: {:?}", error);
-    //                 let mut response = Response::new(Body::empty());
-    //                 *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-    //                 response
-    //             }
-    //         }
-    //     })
-    // });
+    if let TLSInfo::TLS { cert_path, key_path } = options.tls.clone() {
+        let tls = rustls_helpers::get_tlsacceptor_from_files(cert_path, key_path).await?;
+        listener_tls = listener_tls.with_tls(tls);
+    }
 
     let router = Arc::new(Router::new(build, options));
     println!("Running on: {}", addr);
+    
     loop {
-        let (stream, _) = listener.accept().await.expect("Can listen");
-        let io = TokioIo::new(stream);
         let router_ptr = Arc::clone(&router);
 
         let service = service_fn(move |req: Request<hyper::body::Incoming>| {
@@ -75,20 +85,15 @@ pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) {
             }
         });
 
-        tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                eprintln!("Error serving connection: {:?}", err);
-            }
-        });
+        // let (stream, _) = listener_tls.accept(service).await.expect("Can listen");
+        if let Ok((_peer_addr, conn_fut)) = listener_tls.accept(service).await {
+            tokio::task::spawn(async move {
+                if let Err(err) = conn_fut.await {
+                    eprintln!("Error serving connection: {:?}", err);
+                }
+            });    
+        }
     }
-
-    // let server = Server::bind(&addr)
-    //     .serve(service)
-    //     .map_err(|e| eprintln!("server error: {}", e));
-
-    // println!("Running on: {}", addr);
-
-    // hyper::rt::run(server)
 }
 
 // pub fn serve_serverless(

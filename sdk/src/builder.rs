@@ -93,7 +93,7 @@ impl Builder {
     }
 }
 
-// BuilderWithHandlers: builder with handlers attached
+/// BuilderWithHandlers: builder with handlers attached
 #[derive(Clone)]
 pub struct BuilderWithHandlers {
     base: AddonBase,
