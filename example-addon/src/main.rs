@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 use std::env;
-use stremio_addon_sdk::server::{serve_http, ServerOptions, TLSInfo};
+use stremio_addon_sdk::server::{serve_http, ServerOptions, ServerOptionsWithTLSInfo, TLSInfo};
 
 mod manifest;
 use manifest::get_manifest;
@@ -23,12 +23,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(1337);
 
     // HTTP server settings
-    let options = ServerOptions {
+    let server_options = ServerOptions {
         // cache_max_age: 3600 * 24 *3, // cache for 3 days
         cache_max_age: 0,
         port,
         ip: Ipv4Addr::new(127,0,0,1).into(),
-        tls: TLSInfo::NoTLS,
+    };
+
+    let options = ServerOptionsWithTLSInfo {
+        server_options,
+        tls_info: TLSInfo::NoTLS
     };
 
     // run HTTP server asynchronously

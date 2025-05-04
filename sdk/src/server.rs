@@ -28,13 +28,18 @@ impl Default for TLSInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct ServerOptionsWithTLSInfo {
+    pub server_options: ServerOptions,
+    pub tls_info: TLSInfo
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct ServerOptions {
     pub port: u16,
     /// In seconds
     pub cache_max_age: i32,
     pub ip: IpAddr,
-    pub tls: TLSInfo
 }
 
 impl Default for ServerOptions {
@@ -45,20 +50,21 @@ impl Default for ServerOptions {
             cache_max_age: 24 * 3600 * 3,
             port: 7070,
             ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            tls: TLSInfo::default()
         }
     }
 }
 
 /// Start the HTTP server
-pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptions) 
+pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptionsWithTLSInfo) 
     -> Result<(), Box<dyn std::error::Error>> {
+    
+    let (options, tls_info) = (options.server_options, options.tls_info);
     let addr = SocketAddr::new(options.ip, options.port);
     
     let listener = TcpListener::bind(addr).await?;
     let mut listener_tls = HttpOrHttpsAcceptor::new(listener);
 
-    if let TLSInfo::TLS { cert_path, key_path } = options.tls.clone() {
+    if let TLSInfo::TLS { cert_path, key_path } = tls_info {
         let tls = rustls_helpers::get_tlsacceptor_from_files(cert_path, key_path).await?;
         listener_tls = listener_tls.with_tls(tls);
     }
