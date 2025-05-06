@@ -1,3 +1,6 @@
 **/target/
 **/*.rs.bk
 .vscode/
+/target
+.shuttle*
+Secrets*.toml

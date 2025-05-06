@@ -102,6 +102,79 @@ pub async fn serve_http(build: BuilderWithHandlers, options: ServerOptionsWithTL
     }
 }
 
+/// The shuttle/serverless module. Use the feature flag `shuttle` to built it
+#[cfg(feature = "shuttle")]
+pub mod shuttle_serverless {
+    use crate::router::Router;
+    use super::{BuilderWithHandlers, ServerOptionsWithTLSInfo};
+
+    use hyper::StatusCode;
+    use hyper::{service::service_fn, server::conn::http1, body::Bytes, Request, Response};
+    use http_body_util::Full;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::TcpListener;
+    use std::convert::Infallible;
+    use std::sync::Arc;
+
+    /// The service that will be runned by Shuttle
+    pub struct ServerlessShuttle {
+        router: Arc<Router>
+    }
+
+    impl ServerlessShuttle {
+        /// Create a Shuttle Tower Service to host the addon
+        fn new(build: BuilderWithHandlers, options: ServerOptionsWithTLSInfo) -> Self {
+            Self {
+                router: Arc::new(Router::new(build, options.server_options))
+            }
+        }
+    }
+
+    /// Implements the Shuttle Service
+    #[shuttle_runtime::async_trait]
+    impl shuttle_runtime::Service for ServerlessShuttle {
+        async fn bind(mut self, addr: std::net::SocketAddr) -> Result<(), shuttle_runtime::Error> {
+            let listener = TcpListener::bind(addr).await?;
+            let router = self.router;
+
+            loop {
+                let (stream, _) = listener.accept().await?;
+                let io = TokioIo::new(stream);
+
+                let router_ptr = Arc::clone(&router);
+                let service = service_fn(move |req: Request<hyper::body::Incoming>| {
+                    let router_ptr = Arc::clone(&router_ptr);
+                    async move {
+                        match router_ptr.route(req).await {
+                            Ok(response) => Ok::<Response<Full<Bytes>>, Infallible>(response.response()),
+                            Err(err) => {
+                                eprintln!("service error: {:?}", err);
+                                let mut response = Response::new(Full::new(Bytes::new()));
+                                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                Ok(response)        
+                            }
+                        }
+                    }
+                });
+
+                tokio::task::spawn(async move {
+                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                        eprintln!("Error serving connection: {:?}", err);
+                    }
+                });
+            }
+        }
+    }
+
+    //// Host the addon on Shuttle. The port, IP and TLS info is ignored
+    pub fn serve_serverless_shuttle(build: BuilderWithHandlers, options: ServerOptionsWithTLSInfo)
+        -> Result<ServerlessShuttle, shuttle_runtime::Error>
+    {
+        let service = ServerlessShuttle::new(build, options);
+        Ok(service)
+    }
+}
+
 // pub fn serve_serverless(
 //     req: now_lambda::Request, build: BuilderWithHandlers, options: ServerOptions
 // ) -> Result<impl now_lambda::IntoResponse, now_lambda::error::NowError> {
