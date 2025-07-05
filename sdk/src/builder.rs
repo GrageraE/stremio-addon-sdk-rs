@@ -1,15 +1,12 @@
 use stremio_core::types::addon::{Manifest, ManifestResource, ResourcePath, ResourceResponse};
-use stremio_core::addon_transport::AddonTransport;
-use stremio_core::runtime::{EnvError, TryEnvFuture};
-use futures::{future, Future};
+use stremio_core::runtime::EnvError;
 use crate::util::ResourcePathWrapper;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::pin::Pin;
 
-type Handler = dyn Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static;
+// type Handler = dyn Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static;
 // type RouterFut = Box<dyn Future<Item=ResourceResponse, Error=RouterErr>>;
-type RouterFut = Pin<Box<dyn Future<Output = Result<ResourceResponse, EnvError>> + Send>>;
+// type RouterFut = Pin<Box<dyn Future<Output = Result<ResourceResponse, EnvError>> + Send>>;
 
 // #[derive(Debug)]
 // pub enum RouterErr {
@@ -24,9 +21,27 @@ type RouterFut = Pin<Box<dyn Future<Output = Result<ResourceResponse, EnvError>>
 //     }
 // }
 
+/// A handler
+#[async_trait::async_trait]
+pub trait Handler {
+    /// An async function which replies to Stremio
+    async fn reply(&self, resource: &ResourcePath) -> Result<ResourceResponse, EnvError>;
+}
+
+/// Async version of the trait [AddonTransport]
+#[allow(async_fn_in_trait)]
+pub trait AsyncAddonTransport {
+    async fn resource(&self, path: &ResourcePath) -> Result<ResourceResponse, EnvError>;
+    async fn manifest(&self) -> Manifest;
+}
+
+/// Sendable [Handler]
+type HandlerSS = dyn Handler + Send + Sync;
+
+#[allow(async_fn_in_trait)]
 pub trait AddonRouter {
     fn get_manifest(&self) -> &Manifest;
-    fn route(&self, path: &str) -> RouterFut;
+    async fn route(&self, path: &str) -> Result<ResourceResponse, EnvError>;
 }
 
 // Base: just serving the manifest
@@ -39,43 +54,46 @@ impl AddonRouter for AddonBase {
         &self.manifest
     }
 
-    fn route(&self, _: &str) -> RouterFut {
-        Box::pin(future::err(EnvError::Other("Not found".into())))
+    async fn route(&self, _: &str) -> Result<ResourceResponse, EnvError> {
+        Err(EnvError::Other("Not found".into()))
     }
 }
 
 // WithHandler: attach a handler
 #[derive(Clone)]
-pub struct WithHandler<T: AddonRouter> {
+pub struct WithHandler<T> 
+where T: AddonRouter {
     base: T,
     pub match_prefix: String,
-    handler: Arc<Handler>
+    handler: Arc<HandlerSS>
 }
 
-impl<T: AddonRouter> AddonRouter for WithHandler<T> {
+impl<T> AddonRouter for WithHandler<T> 
+where T: AddonRouter {
     fn get_manifest(&self) -> &Manifest {
         self.base.get_manifest()
     }
 
-    fn route(&self, path: &str) -> RouterFut {
+    async fn route(&self, path: &str) -> Result<ResourceResponse, EnvError> {
         if path.starts_with(&self.match_prefix) {
             let res = match ResourcePathWrapper::from_str(path) {
                 Ok(r) => r.into(),
                 Err(parse_error) 
-                    => return Box::pin(future::err(EnvError::Other(format!("Parse Error: {}", parse_error))))
+                    => {return Err(EnvError::Other(format!("Parse Error: {}", parse_error)));}
             };
-            return Box::pin((self.handler)(&res));
+            return self.handler.reply(&res).await;
         }
-        self.base.route(&path)
+        self.base.route(&path).await
     }
 }
 
-impl<T: AddonRouter> AddonTransport for WithHandler<T> {
-    fn manifest(&self) -> TryEnvFuture<Manifest> {
-        Box::pin(future::ok(self.get_manifest().to_owned()))
+impl<T> AsyncAddonTransport for WithHandler<T> 
+where T: AddonRouter {
+    async fn manifest(&self) -> Manifest {
+        self.get_manifest().clone()
     }
-    fn resource(&self, req: &ResourcePath) -> TryEnvFuture<ResourceResponse> {
-        self.route(&ResourcePathWrapper::from(req.clone()).to_string())
+    async fn resource(&self, req: &ResourcePath) -> Result<ResourceResponse, EnvError> {
+        self.route(&ResourcePathWrapper::from(req.clone()).to_string()).await
     }
 }
 
@@ -100,8 +118,7 @@ pub struct BuilderWithHandlers {
     pub handlers: Vec<WithHandler<AddonBase>>
 }
 impl BuilderWithHandlers {
-    fn handle_resource<F>(&mut self, resource_name: &str, handler: F) -> &mut Self 
-    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
+    fn handle_resource(&mut self, resource_name: &str, handler: Arc<HandlerSS>) -> &mut Self 
     {
         if self.handlers.iter().any(|h| self.prefix_to_name(&h.match_prefix) == resource_name) {
             panic!("handler for resource {} is already defined!", resource_name);
@@ -109,26 +126,22 @@ impl BuilderWithHandlers {
         self.handlers.push(WithHandler {
             base: self.base.clone(),
             match_prefix: format!("/{}/", resource_name),
-            handler: Arc::new(handler)
+            handler
         });
         self
     }
-    pub fn define_stream_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
+    pub fn define_stream_handler(&mut self, handler: Arc<HandlerSS>) -> &mut Self 
     {
         self.handle_resource("stream", handler)
     }
-    pub fn define_meta_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
+    pub fn define_meta_handler(&mut self, handler: Arc<HandlerSS>) -> &mut Self 
     {
         self.handle_resource("meta", handler)
     }
-    pub fn define_catalog_handler<F>(&mut self, handler: F) -> &mut Self
-    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static {
+    pub fn define_catalog_handler(&mut self, handler: Arc<HandlerSS>) -> &mut Self {
         self.handle_resource("catalog", handler)
     }
-    pub fn define_subtitles_handler<F>(&mut self, handler: F) -> &mut Self 
-    where F: Fn(&ResourcePath) -> TryEnvFuture<ResourceResponse> + Send + Sync + 'static 
+    pub fn define_subtitles_handler(&mut self, handler: Arc<HandlerSS>) -> &mut Self 
     {
         self.handle_resource("subtitles", handler)
     }
@@ -147,9 +160,7 @@ impl BuilderWithHandlers {
         };
         
         // execute the handler
-        let env_future: TryEnvFuture<ResourceResponse> = handler.resource(&resource);
-        
-        let resource_response = match env_future.await {
+        let resource_response = match handler.resource(&resource).await {
             Ok(r) => r,
             Err(_) => return None
         };

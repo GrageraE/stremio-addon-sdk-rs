@@ -23,9 +23,19 @@ pub use stremio_core;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use stremio_core::types::addon::*;
-    use futures::future;
+    use stremio_core::{runtime::EnvError, types::addon::*};
+
+    struct TestHandler;
+
+    #[async_trait::async_trait]
+    impl builder::Handler for TestHandler {
+        async fn reply(&self, _resource: &ResourcePath) -> Result<ResourceResponse, EnvError> {
+            Ok(ResourceResponse::Streams { streams: vec![] })
+        }
+    }
 
     #[test]
     #[should_panic]
@@ -36,20 +46,23 @@ mod tests {
     #[test]
     #[should_panic]
     fn builder_panics_if_no_resources_defined_for_handler() {
+        let handler = TestHandler;
+
         builder::Builder::new(scaffold::Scaffold::default_manifest())
-            .define_stream_handler(|_| Box::pin(future::ok(ResourceResponse::Streams {streams: vec![]})))
+            .define_stream_handler(Arc::new(handler))
             .build();
     }
 
     #[test]
     #[should_panic]
     fn builder_panics_if_no_handlers_defined_for_resource() {
+        let handler = TestHandler;
         let manifest = Manifest {
             resources: vec![ManifestResource::Short("meta".into()), ManifestResource::Short("stream".into())],
             ..scaffold::Scaffold::default_manifest()
         };
         builder::Builder::new(manifest)
-            .define_stream_handler(|_| Box::pin(future::ok(ResourceResponse::Streams {streams: vec![]})))
+            .define_stream_handler(Arc::new(handler))
             .build();
     }
 }

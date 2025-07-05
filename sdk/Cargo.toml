@@ -25,9 +25,9 @@ flexible-hyper-server-tls = "^0.6.0"
 # Other utils
 serde_json = "1.0"
 semver = { version = "1", features = ["serde"] }
-futures = "0.3"
 percent-encoding = "1.0.1"  # Need old version to support encoding
 url = { version = "2.4", features = ["serde"] }
+async-trait = "^0.1.88"
 
 # Serverless (Shuttle.dev)
 # now_lambda = "0.1.3"
